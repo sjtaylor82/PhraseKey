@@ -1,0 +1,4 @@
+# Downloaded build tools and compiled output
+.build-tools/
+dist/
+*.exe
