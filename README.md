@@ -1,11 +1,11 @@
 # PhraseKey
 
-PhraseKey is a small Windows program that types text for you. You set up a short trigger, and PhraseKey replaces it with whatever you want: a phrase, your address, an email signature.
+PhraseKey is a small Windows program that types text for you. You set up a short trigger, and PhraseKey replaces it with whatever you want, for example, a phrase, your address, or an email signature.
 
-There are two kinds of trigger:
+There are two kinds of triggers:
 
 - **Abbreviations.** Type a short code and press Space. For example, type `brb` then Space and get "be right back".
-- **Chords.** Press several keys at the same moment, like a chord on a piano, then let go. For example, press T, H and E together and get "the".
+- **Chords.** Press several keys at the same time like on a braille display or piano, then let go. For example, press T, H and E together and get the word "the".
 
 PhraseKey works in whatever program you are typing in. It has been tested with the JAWS and NVDA screen readers.
 
@@ -122,11 +122,12 @@ In the Add or Edit window:
 
 - Your entries are saved on your own computer and are still there after you close and reopen PhraseKey, or replace it with a newer version.
 - PhraseKey does not record what you type, does not use the internet and does not use the clipboard.
-- PhraseKey leaves standard Windows password boxes alone. It cannot always recognise password boxes on web pages, so pause it there if you need to.
+- PhraseKey doesn't operate in standard Windows password controls.
+
 
 ## Limits
 
 - Programs running as administrator, and the Windows sign-in and permission screens, do not accept text from PhraseKey.
 - While you hold Ctrl, Alt or the Windows key, PhraseKey stays out of the way. It does the same while you hold Insert or Caps Lock, so screen reader commands are not affected.
 - Clicking the mouse or switching to another window cancels an abbreviation or chord you were part-way through.
-- PhraseKey does not work inside its own windows, so you can type triggers there without setting them off.
+
