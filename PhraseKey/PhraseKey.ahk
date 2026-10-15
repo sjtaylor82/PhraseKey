@@ -1,12 +1,14 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 #Include ChordEngine.ahk
+#Include Updater.ahk
 
 ; Chords use letter, digit and punctuation keys; abbreviations any characters.
 ; Settings only are persisted. Typed text is never logged or saved.
 SendMode "Event"
 SetKeyDelay -1, -1
 SetWorkingDir A_ScriptDir
+AppVersion := "0.9"
 Rules := Map("eht", "the")
 SingleRules := Map()
 SettingsPath := A_AppData "\PhraseKey"
@@ -16,9 +18,13 @@ WindowMs := 90
 TrailingSpace := true
 PlayTick := false
 NvdaWarning := true
+CheckUpdates := true
+SkippedVersion := ""
 try {
     PlayTick := IniRead(SettingsFile, "Options", "PlaySound", "0") = "1"
     NvdaWarning := IniRead(SettingsFile, "Options", "NvdaWarning", "1") = "1"
+    CheckUpdates := IniRead(SettingsFile, "Options", "CheckUpdates", "1") = "1"
+    SkippedVersion := IniRead(SettingsFile, "Options", "SkippedVersion", "")
 }
 try {
     WindowMs := Integer(IniRead(SettingsFile, "Options", "WindowMs", "90"))
@@ -63,7 +69,10 @@ EditorGui := 0
 EditingId := ""
 OwnPid := DllCall("GetCurrentProcessId", "UInt")
 
-Main := Gui(, "PhraseKey 0.8")
+UpdateBusy := false
+UpdateWindow := 0
+
+Main := Gui(, "PhraseKey " AppVersion)
 Main.SetFont("s11", "Segoe UI")
 Main.AddText("w640", "Saved &entries:")
 ChordList := Main.AddListBox("xm w640 r12")
@@ -74,8 +83,11 @@ Main.AddButton("x+10 w120", "&Remove").OnEvent("Click", RemoveSelected)
 Main.AddButton("x+10 w120", "&Hide").OnEvent("Click", (*) => Main.Hide())
 Main.AddButton("x+10 w120", "E&xit").OnEvent("Click", (*) => ExitApp())
 Main.AddButton("xm w200", "&Keyboard shortcuts").OnEvent("Click", ShowShortcuts)
+Main.AddButton("x+10 w200", "Check for &updates").OnEvent("Click", (*) => CheckForUpdate(true))
 SoundBox := Main.AddCheckbox("xm" (PlayTick ? " Checked" : ""), "&Play sound on text replacement")
 SoundBox.OnEvent("Click", SoundToggled)
+UpdateBox := Main.AddCheckbox("xm" (CheckUpdates ? " Checked" : ""), "&Check for updates when PhraseKey starts")
+UpdateBox.OnEvent("Click", UpdateToggled)
 Main.OnEvent("Close", (*) => ExitApp())
 A_TrayMenu.Delete()
 A_TrayMenu.Add("Open entries", ShowMain)
@@ -99,9 +111,17 @@ for key in ["LButton", "RButton", "MButton"]
     Hotkey "~*" key, (*) => ClearTyping()
 Hotkey "^!F11", ShowMain
 Hotkey "^!F12", (*) => ExitApp()
+Hotkey "^!F10", ExplainLastChord
 Main.Show()
 ChordList.Focus()
 ShowNvdaWarning()
+if A_IsCompiled {
+    ; Left behind by an update; the old copy may still be closing.
+    try FileDelete A_ScriptFullPath ".old"
+    SetTimer () => FileExist(A_ScriptFullPath ".old") && FileDelete(A_ScriptFullPath ".old"), -10000
+}
+if CheckUpdates
+    SetTimer () => CheckForUpdate(false), -5000
 
 ; False while paused or while one of this program's own windows is active.
 Tracking() {
@@ -196,11 +216,12 @@ ShowShortcuts(*) {
     help := Gui("+Owner" Main.Hwnd, "PhraseKey keyboard shortcuts")
     help.SetFont("s11", "Segoe UI")
     ; A read-only edit takes the focus, so a screen reader reads the text.
-    help.AddEdit("w520 r22 ReadOnly",
+    help.AddEdit("w520 r25 ReadOnly",
         "Expansion stays active while the PhraseKey window is hidden.`n`n"
         . "From anywhere:`n"
         . "Ctrl+Alt+F11: bring the PhraseKey window back`n"
-        . "Ctrl+Alt+F12: exit PhraseKey`n`n"
+        . "Ctrl+Alt+F12: exit PhraseKey`n"
+        . "Ctrl+Alt+F10: explain the last chord attempt`n`n"
         . "In the PhraseKey window:`n"
         . "Alt+E: saved entries list`n"
         . "Alt+A: add`n"
@@ -209,7 +230,9 @@ ShowShortcuts(*) {
         . "Alt+H: hide`n"
         . "Alt+X: exit`n"
         . "Alt+K: keyboard shortcuts`n"
-        . "Alt+P: play sound on text replacement`n`n"
+        . "Alt+U: check for updates`n"
+        . "Alt+P: play sound on text replacement`n"
+        . "Alt+C: check for updates when PhraseKey starts`n`n"
         . "In the Add or Edit dialog:`n"
         . "Alt+B: abbreviation`n"
         . "Alt+H: chord`n"
@@ -228,6 +251,133 @@ SoundToggled(*) {
     if PlayTick
         Tick()
     Persist()
+}
+; Says why the most recent set of keys did or did not make a chord. Typing
+; anything else first replaces it, so press this straight after the attempt.
+ExplainLastChord(*) {
+    global Engine
+    last := Engine.Last
+    if last.Keys = "" {
+        message := "No chord has been attempted since PhraseKey started."
+    } else {
+        keys := StrLen(last.Keys)
+        message := "Last attempt: " DisplayChord(last.Keys) ", " keys (keys = 1 ? " key" : " keys")
+        if keys > 1
+            message .= ", pressed over " last.Span " ms"
+        message .= ".`n" (last.Expanded ? "It was replaced." : "Not replaced: " last.Reason ".")
+    }
+    report := Gui(, "PhraseKey: last chord")
+    report.SetFont("s11", "Segoe UI")
+    ; A read-only edit takes the focus, so a screen reader reads the message.
+    report.AddEdit("w560 r4 ReadOnly", message)
+    report.AddButton("xm w120 Default", "OK").OnEvent("Click", (*) => report.Destroy())
+    report.OnEvent("Close", (*) => report.Destroy())
+    report.OnEvent("Escape", (*) => report.Destroy())
+    report.Show()
+}
+UpdateToggled(*) {
+    global CheckUpdates, UpdateBox
+    CheckUpdates := UpdateBox.Value
+    Persist()
+}
+; Asks GitHub for the latest release. A check made at startup stays silent
+; unless there is a version the user has not chosen to skip.
+CheckForUpdate(manual) {
+    global UpdateBusy
+    if UpdateBusy {
+        if manual
+            MsgBox "An update check or download is already in progress.", "PhraseKey updates"
+        return
+    }
+    UpdateBusy := true
+    checked(request) {
+        global UpdateBusy, SkippedVersion
+        UpdateBusy := false
+        release := 0
+        try release := request ? ParseRelease(request.ResponseText) : 0
+        if !release {
+            if manual
+                MsgBox "Could not check for updates. Please check your internet connection.", "PhraseKey updates", "Iconx"
+            return
+        }
+        if CompareVersions(release.Version, AppVersion) <= 0 {
+            if manual
+                MsgBox "You are using the latest version, " AppVersion ".", "PhraseKey updates", "Iconi"
+            return
+        }
+        if !manual && release.Version = SkippedVersion
+            return
+        OfferUpdate(release)
+    }
+    HttpGet(UpdateApi, "PhraseKey/" AppVersion, checked)
+}
+; Update windows have no owner, so they get a taskbar button even while the
+; PhraseKey window is hidden.
+OfferUpdate(release) {
+    global UpdateWindow
+    if IsObject(UpdateWindow)
+        return
+    UpdateWindow := Gui(, "PhraseKey update available")
+    UpdateWindow.SetFont("s11", "Segoe UI")
+    how := A_IsCompiled && release.Url != "" && release.Sha256 != ""
+        ? "PhraseKey will download it, then restart. Your entries and settings are kept."
+        : "Update now opens the download page."
+    ; A read-only edit takes the focus, so a screen reader reads the message.
+    UpdateWindow.AddEdit("w520 r3 ReadOnly", "PhraseKey " release.Version " is available. You are using " AppVersion ".`n" how)
+    skip := UpdateWindow.AddCheckbox("xm", "&Skip this version")
+    answer(update, *) {
+        global UpdateWindow, SkippedVersion
+        if !update && skip.Value {
+            SkippedVersion := release.Version
+            Persist()
+        }
+        UpdateWindow.Destroy()
+        UpdateWindow := 0
+        if update
+            DownloadUpdate(release)
+    }
+    UpdateWindow.AddButton("xm w140 Default", "&Update now").OnEvent("Click", answer.Bind(true))
+    UpdateWindow.AddButton("x+10 w140", "&Not now").OnEvent("Click", answer.Bind(false))
+    UpdateWindow.OnEvent("Close", answer.Bind(false))
+    UpdateWindow.OnEvent("Escape", answer.Bind(false))
+    UpdateWindow.Show()
+}
+DownloadUpdate(release) {
+    global UpdateBusy, UpdateWindow
+    ; Only the compiled program can replace itself, and only with a download
+    ; whose checksum GitHub published.
+    if !A_IsCompiled || release.Url = "" || release.Sha256 = "" {
+        Run UpdatePage
+        return
+    }
+    UpdateBusy := true
+    UpdateWindow := Gui(, "PhraseKey update")
+    UpdateWindow.SetFont("s11", "Segoe UI")
+    UpdateWindow.AddEdit("w520 r2 ReadOnly", "Downloading PhraseKey " release.Version ". PhraseKey will restart when it is ready.")
+    UpdateWindow.Show()
+    downloaded(request) {
+        global UpdateBusy, UpdateWindow
+        zip := A_Temp "\PhraseKey-" release.Version "-win64.zip"
+        try {
+            if !request
+                throw Error("The download failed. Please check your internet connection.")
+            SaveResponse(request, zip)
+            if FileSha256(zip) != release.Sha256
+                throw Error("The download did not match its published checksum, so it was not installed.")
+            ApplyUpdate(zip, A_ScriptFullPath)
+        } catch as err {
+            try FileDelete zip
+            UpdateBusy := false
+            UpdateWindow.Destroy()
+            UpdateWindow := 0
+            if MsgBox("PhraseKey could not update itself. " err.Message "`n`nOpen the download page instead?", "PhraseKey update", "YesNo Iconx") = "Yes"
+                Run UpdatePage
+            return
+        }
+        Run '"' A_ScriptFullPath '"'
+        ExitApp
+    }
+    HttpGet(release.Url, "PhraseKey/" AppVersion, downloaded)
 }
 ; NVDA by default takes over simulated keys once a Backspace is sent and
 ; scrambles or drops what follows. Its documented remedy is a setting, which
@@ -445,7 +595,11 @@ OpenEditor(id := "") {
     }
     Main.Opt("+Disabled")
     EditorGui.Show()
-    ChordEdit.Focus()
+    ; A new entry starts with its type; editing goes straight to the keys.
+    if id = ""
+        SingleRadio.Focus()
+    else
+        ChordEdit.Focus()
 }
 CloseEditor(*) {
     global Main, EditorGui, ChordList
@@ -479,22 +633,6 @@ SaveEntry(*) {
     if table.Has(key) && id != EditingId {
         MsgBox "That entry already exists. Select it in the list and choose Edit.", "Duplicate entry"
         return
-    }
-    if !singleMode {
-        for existing, value in Rules {
-            if ("chord:" existing) = EditingId
-                continue
-            shorter := StrLen(existing) < StrLen(key) ? existing : key
-            longer := StrLen(existing) < StrLen(key) ? key : existing
-            subset := true
-            for letter in StrSplit(shorter)
-                if !InStr(longer, letter)
-                    subset := false
-            if subset {
-                MsgBox "This contains all the keys of " DisplayChord(existing) " or is contained in it. Choose a different combination.", "Overlapping chord"
-                return
-            }
-        }
     }
     if EditingId != "" && EditingId != id {
         old := StrSplit(EditingId, ":",, 2)
@@ -587,6 +725,8 @@ Persist() {
         IniWrite TrailingSpace ? 1 : 0, temp, "Options", "TrailingSpace"
         IniWrite PlayTick ? 1 : 0, temp, "Options", "PlaySound"
         IniWrite NvdaWarning ? 1 : 0, temp, "Options", "NvdaWarning"
+        IniWrite CheckUpdates ? 1 : 0, temp, "Options", "CheckUpdates"
+        IniWrite SkippedVersion, temp, "Options", "SkippedVersion"
         ; Sentinel distinguishes an intentionally empty collection.
         IniWrite "1", temp, "Chords", "_saved"
         for chord, value in Rules

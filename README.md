@@ -46,7 +46,7 @@ Things to know:
 - The order you press the keys in does not matter. What matters is that they are all down together before you let any of them go.
 - With four or more keys, take as long as you like to get them all down.
 - With two or three keys, press them quickly and together. This stops ordinary fast typing from setting one off by accident.
-- Two chords cannot be the same keys, and one cannot be contained in another. For example, you cannot have both T H and T H E.
+- Two chords cannot be exactly the same keys, but one can be contained in another. For example, you can have both W E and W E `'`: PhraseKey uses whichever set of keys you held down.
 - Some keyboards cannot register many keys at once. If a large chord sometimes fails, try a different combination or fewer keys.
 
 ## Adding, changing and removing entries
@@ -73,6 +73,17 @@ To delete an entry, select it in the list and choose **Remove**.
 
 Check **Play sound on text replacement** in the main window to hear a short, quiet tick each time PhraseKey replaces something. It is off to begin with.
 
+## Updates
+
+A few seconds after it starts, PhraseKey checks whether a newer version is available. If there is one, it asks whether to update now.
+
+- Choose **Update now** and PhraseKey downloads the new version, checks that the download is genuine and complete, replaces itself and restarts. Your entries and settings are kept.
+- Choose **Not now** to be asked again next time. Check **Skip this version** first if you don't want to hear about that version again.
+- Choose **Check for updates** in the main window to check at any time, even for a version you skipped.
+- Uncheck **Check for updates when PhraseKey starts** to stop the automatic check.
+
+If PhraseKey is in a folder it isn't allowed to change, such as Program Files, it offers to open the download page instead.
+
 ## Screen readers
 
 ### NVDA
@@ -97,6 +108,7 @@ From anywhere:
 
 - Ctrl+Alt+F11: bring the PhraseKey window back
 - Ctrl+Alt+F12: close PhraseKey
+- Ctrl+Alt+F10: explain the last chord attempt. If a chord doesn't work, press this straight away to hear which keys PhraseKey saw, how far apart they went down, and why it didn't replace them.
 
 In the PhraseKey window:
 
@@ -107,7 +119,9 @@ In the PhraseKey window:
 - Alt+H: hide
 - Alt+X: exit
 - Alt+K: keyboard shortcuts
+- Alt+U: check for updates
 - Alt+P: play sound on text replacement
+- Alt+C: check for updates when PhraseKey starts
 
 In the Add or Edit window:
 
@@ -121,7 +135,8 @@ In the Add or Edit window:
 ## Your entries and your privacy
 
 - Your entries are saved on your own computer and are still there after you close and reopen PhraseKey, or replace it with a newer version.
-- PhraseKey does not record what you type, does not use the internet and does not use the clipboard.
+- PhraseKey does not record what you type and does not use the clipboard.
+- The only time PhraseKey uses the internet is to check GitHub for updates and download them. Nothing about you or your entries is sent.
 - PhraseKey doesn't operate in standard Windows password controls.
 
 
