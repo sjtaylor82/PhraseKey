@@ -11,7 +11,7 @@
 SendMode "Event"
 SetKeyDelay -1, -1
 SetWorkingDir A_ScriptDir
-AppVersion := "0.9.1"
+AppVersion := "0.9.2"
 Rules := Map("eht", "the")
 SingleRules := Map()
 ; Suffix chords are saved without the suffix key, as "i" => "ing";
@@ -231,11 +231,15 @@ PasswordField() {
     }
     return false
 }
+; The name of a modifier or screen reader key held down, or "". The hook's
+; record of a key stays down if its release is missed, as when a screen
+; reader takes the release for itself, which would block every chord until
+; PhraseKey restarts; so Windows must agree that the key is down.
 ShortcutHeld() {
-    return GetKeyState("Ctrl", "P") || GetKeyState("Alt", "P")
-        || GetKeyState("LWin", "P") || GetKeyState("RWin", "P")
-        || GetKeyState("Insert", "P") || GetKeyState("NumpadIns", "P")
-        || GetKeyState("CapsLock", "P")
+    for key in ["Ctrl", "Alt", "LWin", "RWin", "Insert", "NumpadIns", "CapsLock"]
+        if GetKeyState(key, "P") && DllCall("GetAsyncKeyState", "Int", GetKeyVK(key), "Short") < 0
+            return key
+    return ""
 }
 ; The unshifted character of a key that can take part in a chord, or "".
 ChordKey(vk) {
@@ -604,7 +608,13 @@ KeyUp(hook, vk, sc) {
         ExpandPending(active && Engine.Last.Suffix && !ShortcutHeld() && !PasswordField() ? text : "")
         return
     }
-    if text = "" || !active || ShortcutHeld() || PasswordField() {
+    if text = "" || !active || (held := ShortcutHeld()) || PasswordField() {
+        if text != "" {
+            Engine.Last.Expanded := false
+            Engine.Last.Reason := !active ? "PhraseKey is paused or its own window is active"
+                : held != "" ? held " was held down when the keys were released"
+                : "the cursor is in a password field"
+        }
         ; Typing, not a chord: punctuation it typed may still need its space removed.
         if active
             FixPunctuation()

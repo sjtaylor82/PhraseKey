@@ -275,7 +275,7 @@ When you type quickly, Space and the first letter of the next word can be down a
 
 ### Chords are hard to press, or don't always work
 
-Press **Ctrl+Alt+F10** straight after a chord that didn't work. If it says the keys were too slow, raise **Chord timing**, or **Space chord timing** for chords with Space, in **Options**.
+Press **Ctrl+Alt+F10** straight after a chord that didn't work. If it says the keys were too slow, raise **Chord timing**, or **Space chord timing** for chords with Space, in **Options**. If it says a key such as Insert or Caps Lock was held down when you weren't holding it, exit PhraseKey (Ctrl+Alt+F12), start it again, and please report it.
 
 ## Options
 
