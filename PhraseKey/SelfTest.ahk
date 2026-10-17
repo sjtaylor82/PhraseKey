@@ -1,5 +1,8 @@
 #Requires AutoHotkey v2.0
 #Include ChordEngine.ahk
+#Include AfterExpansion.ahk
+#Include WordForms.ahk
+#Include Bundled.ahk
 #Include Updater.ahk
 
 ; Tests use the ACTUAL recogniser, with deterministic event times.
@@ -115,6 +118,119 @@ try {
         }
     }
 
+    engine := ChordEngine(Map("eht", "the"), 90, Map(";i", "ing"))
+    engine.Down(";", 0), engine.Down("i", 10)
+    out := engine.Up(";", 20) engine.Up("i", 30)
+    Check(out, "ing", "Suffix chord gives its ending")
+    Check(engine.Last.Suffix, true, "Suffix chord is reported as one")
+    engine.Down("t", 100), engine.Down("h", 110), engine.Down("e", 120)
+    out := engine.Up("t", 130) engine.Up("h", 140) engine.Up("e", 150)
+    Check(engine.Last.Suffix, false, "Ordinary chord is not a suffix chord")
+    engine.Down(";", 200)
+    Check(engine.MayComplete(), true, "Held key may still become a chord")
+    engine.Down("x", 210)
+    Check(engine.MayComplete(), false, "No chord uses these keys")
+    engine.Up(";", 220), engine.Up("x", 230)
+    engine.Down(".", 300)
+    Check(engine.MayComplete(), false, "Key used by no chord")
+    engine.Up(".", 310)
+
+    for test in [["like", "ing", "liking"], ["like", "ed", "liked"], ["make", "ing", "making"],
+            ["run", "ing", "running"], ["run", "ed", "ran"], ["stop", "ed", "stopped"],
+            ["visit", "ing", "visiting"], ["open", "ed", "opened"], ["prefer", "ed", "preferred"],
+            ["try", "s", "tries"], ["try", "ed", "tried"], ["try", "ing", "trying"], ["play", "ed", "played"],
+            ["watch", "s", "watches"], ["child", "s", "children"], ["man", "s", "men"], ["go", "s", "goes"],
+            ["happy", "ness", "happiness"], ["happy", "ly", "happily"], ["happy", "er", "happier"],
+            ["care", "ful", "careful"], ["careful", "ly", "carefully"], ["gentle", "ly", "gently"],
+            ["basic", "ly", "basically"], ["full", "ly", "fully"], ["die", "ing", "dying"],
+            ["see", "ing", "seeing"], ["good", "er", "better"], ["big", "er", "bigger"],
+            ["quick", "er", "quicker"], ["teach", "er", "teacher"], ["quit", "ing", "quitting"],
+            ["determine", "ed", "determined"], ["millionaire", "s", "millionaires"],
+            ["Like", "ing", "Liking"], ["LIKE", "ing", "LIKING"], ["write", "ed", "wrote"]]
+        Check(AddSuffix(test[1], test[2]), test[3], test[1] " + " test[2])
+    Check(AddSuffix("Run", "ed", Map("run", Map("ed", "runned"))), "Runned", "Saved form comes first")
+
+    after := AfterExpansion()
+    after.Expanded("like", true)
+    after.Add(";"), after.Add("i")
+    Check(Edit(after.Suffix("ing", 2)), "7:liking ", "Suffix replaces word and space")
+    after.Add(";"), after.Add("l")
+    Check(Edit(after.Suffix("ly", 2)), "9:likingly ", "Suffixes stack")
+    after.Expanded("care", true)
+    after.Add(";"), after.Add("f")
+    after.Suffix("ful", 2)
+    after.Add(";"), after.Add("l")
+    Check(Edit(after.Suffix("ly", 2)), "10:carefully ", "Care, careful, carefully")
+    after.Expanded("like", false)
+    after.Add(";"), after.Add("i")
+    Check(Edit(after.Suffix("ing", 2)), "6:liking ", "Suffix after a replacement with no space adds one")
+    after.Expanded("as soon as possible", true)
+    after.Add(";"), after.Add("s")
+    Check(after.Suffix("s", 2), 0, "No suffix after a phrase")
+    after.Expanded("like", true)
+    after.Add("x")
+    Check(after.Punctuate(false, false), 0, "Letter is not punctuation")
+    after.Add(";"), after.Add("i")
+    Check(after.Suffix("ing", 2), 0, "No suffix once something else was typed")
+    ; Prefix: pre with no space, then determine.
+    after.Expanded("pre", false)
+    after.Expanded("determine", true)
+    after.Add(";"), after.Add("e")
+    Check(Edit(after.Suffix("ed", 2)), "12:determined ", "Suffix changes only the last replacement")
+
+    after.Expanded("like", true)
+    after.Add(".")
+    Check(Edit(after.Punctuate(false, false)), "2:.", "Full stop replaces the space")
+    after.Expanded("like", true)
+    after.Add(",")
+    Check(Edit(after.Punctuate(false, true)), "2:, ", "Optional space after punctuation")
+    after.Expanded("like", true)
+    after.Add(";")
+    Check(after.Punctuate(true, false), 0, "Wait while a chord may be under way")
+    after.Add(" ")
+    Check(Edit(after.Punctuate(false, false)), "3:; ", "Space typed fast after a semicolon is kept")
+    after.Expanded("like", true)
+    after.Add('"')
+    Check(after.Punctuate(false, false), 0, "Quote keeps the space")
+    after.Expanded("like", true)
+    after.Add("-")
+    Check(after.Punctuate(false, false), 0, "Dash keeps the space")
+    after.Expanded("pre", false)
+    after.Add(".")
+    Check(after.Punctuate(false, false), 0, "Nothing to remove without a space")
+    after.Expanded("like", true)
+    after.Add("'"), after.Punctuate(false, false)
+    after.Add("s")
+    Check(after.Punctuate(false, false), 0, "Punctuation is fixed only once")
+
+    Check(Edit(TypedSuffix("walk;i", 2, "ing")), "6:walking ", "Typed word, suffix straight after")
+    Check(Edit(TypedSuffix("walk `;i", 2, "ing")), "7:walking ", "Typed word and space, then suffix")
+    Check(Edit(TypedSuffix("Walk;e", 2, "ed")), "6:Walked ", "Typed word keeps its capital")
+    Check(Edit(TypedSuffix("I walk `;e", 2, "ed")), "7:walked ", "Only the last word changes")
+    Check(Edit(TypedSuffix("walk i", 2, "ing")), "6:walking ", "Space suffix key, straight after the word")
+    Check(Edit(TypedSuffix("walk  i", 2, "ing")), "7:walking ", "Space suffix key, after a space")
+    Check(TypedSuffix(";i", 2, "ing"), 0, "No typed word to change")
+    Check(TypedSuffix("x.;i", 2, "ing"), 0, "Typed text that is not a word")
+    Check(TypedSuffix("walk  `;i", 2, "ing"), 0, "Two spaces after the word")
+
+    engine := ChordEngine(Map("eht", "the"), 90, Map(" i", "ing"))
+    engine.Down(" ", 0), engine.Down("i", 20)
+    out := engine.Up(" ", 40) engine.Up("i", 50)
+    Check(out, "ing", "Space chord pressed together")
+    engine.Down(" ", 100), engine.Down("i", 160)
+    out := engine.Up(" ", 170) engine.Up("i", 180)
+    Check(out, "", "Space rolled into the next word is typing")
+    Check(InStr(engine.Last.Reason, "Space") > 0, true, "Report names the Space limit")
+    engine.Down("t", 200), engine.Down("h", 260), engine.Down("e", 270)
+    out := engine.Up("t", 280) engine.Up("h", 290) engine.Up("e", 300)
+    Check(out, "the", "Other chords keep the usual limit")
+
+    for word in ["happy", "happier", "happiness", "happily", "carefully", "walking", "can't", "a", "zygote"]
+        Check(KnownWord(word), true, "Known word " word)
+    for word in ["happying", "happies", "happied", "walkly", "likingly", "zzz", ""]
+        Check(KnownWord(word), false, "Not a word " word)
+    Check(KnownWord("Happiness"), true, "Capitals do not matter")
+
     for pair in [["0.9", "0.8", 1], ["v0.10", "0.9", 1], ["1.0", "1", 0], ["0.8", "0.8.1", -1]]
         Check(Sign(CompareVersions(pair[1], pair[2])), pair[3], "Compare " pair[1] " with " pair[2])
 
@@ -153,6 +269,7 @@ ExitApp 0
 Sign(n) => n > 0 ? 1 : n < 0 ? -1 : 0
 StrRepeat(text, n) => StrReplace(Format("{:" n "}", ""), " ", text)
 NewEngine() =>ChordEngine(Map("eht", "the"), 90)
+Edit(edit) => IsObject(edit) ? edit.Erase ":" edit.Text : "none"
 Check(actual, expected, label) {
     global Count
     Count += 1

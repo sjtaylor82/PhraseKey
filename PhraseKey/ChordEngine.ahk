@@ -8,12 +8,18 @@
 ; once never happens in typing, so larger chords have no time limit.
 ; Up() returns the replacement when the last key of such a stroke is
 ; released; Chars is then the number of letters the stroke typed, which
-; the caller erases. Last describes the most recent finished stroke.
+; the caller erases. Last describes the most recent finished stroke;
+; Last.Suffix says it matched a suffix chord, whose Up() result is the
+; ending to add.
 class ChordEngine {
-    __New(rules, window := 90) {
+    __New(rules, window := 30, suffixes := 0) {
         this.Rules := rules
+        this.Suffixes := IsObject(suffixes) ? suffixes : Map()
         this.Window := window
-        this.Last := {Keys: "", Span: 0, Expanded: false, Reason: ""}
+        ; Space chords need a tighter limit: fast typing often holds Space
+        ; while the first letter of the next word goes down.
+        this.SpaceWindow := 20
+        this.Last := {Keys: "", Span: 0, Expanded: false, Reason: "", Suffix: false}
         this.Reset()
     }
     Reset() {
@@ -66,15 +72,30 @@ class ChordEngine {
             reason := "cancelled by another key, a click or a change of window"
         else if this.Staggered
             reason := "the keys were not all held down together"
-        else if !this.Rules.Has(signature)
+        else if !this.Rules.Has(signature) && !this.Suffixes.Has(signature)
             reason := "no saved chord uses exactly these keys"
-        else if this.Keys.Count <= 3 && this.Span > this.Window
-            reason := "too slow for a chord of 2 or 3 keys (limit " this.Window " ms)"
+        else if this.Keys.Count <= 3 && this.Span > (limit := this.Keys.Has(" ") ? this.SpaceWindow : this.Window)
+            reason := "too slow for a chord of 2 or 3 keys (limit " limit " ms" (this.Keys.Has(" ") ? " for chords with Space" : "") ")"
         else
             reason := ""
-        this.Last := {Keys: signature, Span: this.Span, Expanded: reason = "", Reason: reason}
+        suffix := !this.Rules.Has(signature) && this.Suffixes.Has(signature)
+        this.Last := {Keys: signature, Span: Round(this.Span), Expanded: reason = "", Reason: reason, Suffix: suffix}
         this.Cancelled := true
-        return reason = "" ? this.Rules[signature] : ""
+        return reason = "" ? (suffix ? this.Suffixes[signature] : this.Rules[signature]) : ""
+    }
+    ; True while the keys held so far could still become a chord when
+    ; released, so what they typed must be left alone until then.
+    MayComplete() {
+        if !this.Held.Count || this.Cancelled || this.Staggered
+            return false
+        for table in [this.Rules, this.Suffixes]
+            for signature in table {
+                for key in this.Keys
+                    if !InStr(signature, key)
+                        continue 2
+                return true
+            }
+        return false
     }
     ; Any other key, shortcut, click or focus change: not a chord.
     Break() {
