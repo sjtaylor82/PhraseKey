@@ -11,7 +11,7 @@
 SendMode "Event"
 SetKeyDelay -1, -1
 SetWorkingDir A_ScriptDir
-AppVersion := "0.9.2"
+AppVersion := "0.9.3"
 Rules := Map("eht", "the")
 SingleRules := Map()
 ; Suffix chords are saved without the suffix key, as "i" => "ing";
@@ -146,6 +146,9 @@ UpdateWindow := 0
 
 Main := Gui(, "PhraseKey " AppVersion)
 Main.SetFont("s11", "Segoe UI")
+Main.AddText("w640", "&Search saved entries:")
+SearchEdit := Main.AddEdit("xm w640")
+SearchEdit.OnEvent("Change", (*) => RefreshList())
 Main.AddText("w640", "Saved &entries:")
 ChordList := Main.AddListBox("xm w640 r12")
 ChordList.OnEvent("DoubleClick", (*) => EditSelected())
@@ -756,20 +759,25 @@ TogglePause(*) {
         A_TrayMenu.Uncheck("Pause expansion")
 }
 RefreshList(select := "") {
-    global ChordList, RuleKeys, Rules, SingleRules, SuffixEntries, SuffixKey, NoSpace
+    global ChordList, SearchEdit, RuleKeys, Rules, SingleRules, SuffixEntries, SuffixKey, NoSpace
+    if select = "" && ChordList.Value && ChordList.Value <= RuleKeys.Length
+        select := RuleKeys[ChordList.Value]
     ChordList.Delete()
     entries := []
     for key, value in SingleRules
-        entries.Push(["single:" key, "Abbreviation " key " = " OneLine(value)])
+        entries.Push(["single:" key, OneLine(value) " = " key " (abbreviation)"])
     for chord, value in Rules
-        entries.Push(["chord:" chord, "Chord " DisplayChord(chord) " = " OneLine(value)])
+        entries.Push(["chord:" chord, OneLine(value) " = " DisplayChord(chord) " (chord)"])
     for keys, ending in SuffixEntries
-        entries.Push(["suffix:" keys, "Suffix chord " DisplayChord(keys) " " ShortKeyName(SuffixKey) " adds " ending])
+        entries.Push(["suffix:" keys, ending " = " DisplayChord(keys) " " ShortKeyName(SuffixKey) " (suffix chord)"])
     RuleKeys := []
     labels := []
     for entry in entries {
+        label := entry[2] (NoSpace.Has(entry[1]) ? ", no space after" : "")
+        if SearchEdit.Value != "" && !InStr(label, SearchEdit.Value)
+            continue
         RuleKeys.Push(entry[1])
-        labels.Push(entry[2] (NoSpace.Has(entry[1]) ? ", no space after" : ""))
+        labels.Push(label)
     }
     ChordList.Add(labels)
     for index, id in RuleKeys

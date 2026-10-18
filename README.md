@@ -60,6 +60,9 @@ Press two to eight keys together, then release them. The letters appear as you p
 Things to know:
 
 - You can use letter keys, number keys and punctuation keys such as `;` `'` `\` `=` `,` `.` `/` `[` `]` and `-`. Space can only be part of suffix chords.
+- Choose chords that cannot easily be mistaken for ordinary typing. Three or more keys are safer than two, because fast typing often leaves two letter keys held down together for an instant.
+- Avoid two-letter chords, especially pairs that occur in short words or at the beginnings of words. If you want a two-key chord, make one key punctuation, for example semicolon. Punctuation makes an accidental match much less likely.
+- If a chord goes off during ordinary typing, try lowering **Chord timing** in **Options**. A lower value makes accidental matches less likely, but also means you must press an intended two- or three-key chord more nearly simultaneously.
 - The order you press the keys in does not matter. What matters is that they are all down together before you let any of them go.
 - With four or more keys, take as long as you like to get them all down.
 - With two or three keys, press them all at once: they must all go down within 30 thousandths of a second to begin with. This stops ordinary fast typing from setting one off by accident. You can change the limit in **Options**; see **Fast typists**.
@@ -322,6 +325,8 @@ The one thing fast typing affects is telling chords apart from ordinary typing, 
 Most people find a good setting within a few tries. A suffix key of `;`, `/` or `'` avoids the question for suffix chords altogether.
 
 ## Adding, changing and removing entries
+
+The saved-entry list starts each row with its replacement text, followed by its trigger and whether it is a chord or abbreviation. With the list focused, type the first letter of a replacement to move to it. Use **Search saved entries** to filter the list by replacement, trigger or type.
 
 1. In the PhraseKey window, choose **Add**. To change an entry, select it in the list and choose **Edit**.
 2. Choose **Abbreviation** or **Chord**. For a suffix chord, choose **Chord** and check **Treat as suffix**.
