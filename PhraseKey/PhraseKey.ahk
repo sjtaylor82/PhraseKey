@@ -5,13 +5,14 @@
 #Include WordForms.ahk
 #Include Bundled.ahk
 #Include Updater.ahk
+#Include BrailleInput.ahk
 
 ; Chords use letter, digit and punctuation keys; abbreviations any characters.
 ; Settings only are persisted. Typed text is never logged or saved.
 SendMode "Event"
 SetKeyDelay -1, -1
 SetWorkingDir A_ScriptDir
-AppVersion := "0.9.3"
+AppVersion := "0.9.4"
 Rules := Map("eht", "the")
 SingleRules := Map()
 ; Suffix chords are saved without the suffix key, as "i" => "ing";
@@ -23,6 +24,8 @@ SuffixKey := " "
 NoSpace := Map()
 ; Word forms the user corrected: word => Map(ending => form).
 SavedForms := Map()
+; Braille entries, dots => replacement, as "45 134" => "more".
+BrailleRules := Map()
 SettingsPath := A_AppData "\PhraseKey"
 ; Automated tests use their own settings: PhraseKey.ahk --settings folder
 if A_Args.Length = 2 && A_Args[1] = "--settings"
@@ -39,6 +42,7 @@ SkippedVersion := ""
 SpaceAfterPunctuation := false
 SuffixOnTyped := true
 PunctuationExpands := true
+BrailleAutoOff := true
 try {
     PlayTick := IniRead(SettingsFile, "Options", "PlaySound", "0") = "1"
     NvdaWarning := IniRead(SettingsFile, "Options", "NvdaWarning", "1") = "1"
@@ -47,6 +51,7 @@ try {
     SpaceAfterPunctuation := IniRead(SettingsFile, "Options", "SpaceAfterPunctuation", "0") = "1"
     SuffixOnTyped := IniRead(SettingsFile, "Options", "SuffixOnTypedWords", "1") = "1"
     PunctuationExpands := IniRead(SettingsFile, "Options", "PunctuationExpands", "1") = "1"
+    BrailleAutoOff := IniRead(SettingsFile, "Options", "BrailleAutoOff", "1") = "1"
     key := DecodeKey(IniRead(SettingsFile, "Options", "SuffixKey", EncodeKey(" ")))
     if IsSuffixKey(key)
         SuffixKey := key
@@ -106,6 +111,13 @@ try {
 }
 BuildSuffixes()
 try {
+    for line in StrSplit(IniRead(SettingsFile, "Braille",, ""), "`n", "`r") {
+        equals := InStr(line, "=")
+        if equals && (dots := NormaliseDots(DecodeKey(SubStr(line, 1, equals - 1)))) != ""
+            BrailleRules[dots] := Decode(SubStr(line, equals + 1))
+    }
+}
+try {
     for line in StrSplit(IniRead(SettingsFile, "NoSpace",, ""), "`n", "`r") {
         equals := InStr(line, "=")
         if equals
@@ -122,6 +134,11 @@ try {
 Engine := ChordEngine(Rules, WindowMs, Suffixes)
 Engine.SpaceWindow := SpaceWindowMs
 After := AfterExpansion()
+Braille := BrailleRun()
+; What happened to the last braille cells, for Ctrl+Alt+F10.
+LastBraille := ""
+; When braille cells were last replaced, as A_TickCount, unless by Enter.
+BrailleDone := 0
 Paused := false
 ; Characters typed since the last space. Dirty means the text before them
 ; is unknown, so they cannot be matched as a whole word.
@@ -137,6 +154,8 @@ Target := 0
 RelayWatch := {Until: 0, Seen: 0, Told: false}
 
 EditorGui := 0
+EditorCells := false
+SpaceChosen := false
 OptionsGui := 0
 EditingId := ""
 OwnPid := DllCall("GetCurrentProcessId", "UInt")
@@ -217,9 +236,10 @@ Tracking() {
     return false
 }
 ClearTyping() {
-    global Engine, Word, Dirty, After, Recent, Pending
+    global Engine, Word, Dirty, After, Recent, Pending, Braille
     Engine.Break()
     After.Clear()
+    Braille.Clear()
     Pending := {Abbreviation: "", Typed: ""}
     Word := ""
     Dirty := false
@@ -337,7 +357,7 @@ ShowShortcuts(*) {
         . "From anywhere:`n"
         . "Ctrl+Alt+F11: bring the PhraseKey window back`n"
         . "Ctrl+Alt+F12: exit PhraseKey`n"
-        . "Ctrl+Alt+F10: explain the last chord attempt`n`n"
+        . "Ctrl+Alt+F10: explain the last chord attempt and the last braille cells`n`n"
         . "In the PhraseKey window:`n"
         . "Alt+E: saved entries list`n"
         . "Alt+A: add`n"
@@ -356,12 +376,14 @@ ShowShortcuts(*) {
         . "Alt+W: suffix chords also work on words I type`n"
         . "Alt+B: abbreviations also expand when followed by punctuation`n"
         . "Alt+S: add a space after punctuation that follows a replacement`n"
+        . "Alt+U: turn JAWS Unicode braille input off after a braille entry`n"
         . "Alt+C: chord timing`n"
         . "Alt+T: Space chord timing`n"
         . "Alt+F: open the folder where your entries are saved`n`n"
         . "In the Add or Edit dialog:`n"
         . "Alt+B: abbreviation`n"
         . "Alt+H: chord`n"
+        . "Alt+D: braille dots`n"
         . "Alt+T: treat as suffix`n"
         . "Alt+K: keys`n"
         . "Alt+R: replacement text`n"
@@ -384,7 +406,7 @@ SoundToggled(*) {
 ; Says why the most recent set of keys did or did not make a chord. Typing
 ; anything else first replaces it, so press this straight after the attempt.
 ExplainLastChord(*) {
-    global Engine
+    global Engine, LastBraille
     last := Engine.Last
     if last.Keys = "" {
         message := "No chord has been attempted since PhraseKey started."
@@ -395,10 +417,12 @@ ExplainLastChord(*) {
             message .= ", pressed over " last.Span " ms"
         message .= ".`n" (last.Expanded ? "It was replaced." : "Not replaced: " last.Reason ".")
     }
+    if LastBraille != ""
+        message .= "`n`n" LastBraille
     report := Gui(, "PhraseKey: last chord")
     report.SetFont("s11", "Segoe UI")
     ; A read-only edit takes the focus, so a screen reader reads the message.
-    report.AddEdit("w560 r4 ReadOnly", message)
+    report.AddEdit("w560 r8 ReadOnly", message)
     report.AddButton("xm w120 Default", "OK").OnEvent("Click", (*) => report.Destroy())
     report.OnEvent("Close", (*) => report.Destroy())
     report.OnEvent("Escape", (*) => report.Destroy())
@@ -549,7 +573,7 @@ RelayedErase() {
     return true
 }
 KeyDown(hook, vk, sc) {
-    global Engine, Word, Dirty, After, Recent, Pending
+    global Engine, Word, Dirty, After, Recent, Pending, Braille, BrailleAutoOff, LastBraille
     Critical
     if vk = 0x10 || vk = 0xA0 || vk = 0xA1    ; Shift
         return
@@ -584,6 +608,7 @@ KeyDown(hook, vk, sc) {
             return
         After.Clear()
         Pending := {Abbreviation: "", Typed: ""}
+        Braille.Erase()
         if Word = ""
             Dirty := true
         else
@@ -596,6 +621,30 @@ KeyDown(hook, vk, sc) {
         Recent := ""
         After.Clear()
         Pending := {Abbreviation: "", Typed: ""}
+        ; Enter on the display is a real key, not a cell. Straight after the
+        ; cells it ends them as Space does, keeping its new line. Later, the
+        ; cells may have been followed by contracted braille PhraseKey could
+        ; not see, so they are left alone, and Unicode braille input, very
+        ; likely already off, with them.
+        if vk = 0x0D && Braille.Cells != "" {
+            if A_TickCount - Braille.Last <= BrailleRun.EnterMs {
+                FinishBraille("`n")
+                return
+            }
+            LastBraille := "Last braille cells: dots " CellsDots(Braille.Cells) ".`nNot replaced: Enter came more than "
+                . BrailleRun.EnterMs // 1000 " seconds after the last cell. Press Space or Enter straight after the cells."
+            Braille.Clear()
+            return
+        }
+        ; Cells ended any other way stay as typed. Straight after them,
+        ; Unicode braille input is still on, so turn it off all the same.
+        if Braille.Cells != "" {
+            LastBraille := "Last braille cells: dots " CellsDots(Braille.Cells) ".`nNot replaced: they were followed by "
+                . GetKeyName(Format("vk{:02X}", vk)) ". Only Space or Enter, pressed straight after the cells, replaces them."
+            if BrailleAutoOff && A_TickCount - Braille.Last <= BrailleRun.EnterMs
+                SetTimer UnicodeBrailleOff, -1
+        }
+        Braille.Clear()
     }
 }
 KeyUp(hook, vk, sc) {
@@ -675,11 +724,54 @@ FixPunctuation() {
         Replace(edit.Erase, edit.Text, false, true)
 }
 CharTyped(hook, char) {
-    global Word, Dirty, SingleRules, After, Recent, Engine, PunctuationExpands, SpaceAfterPunctuation, Pending
+    global Word, Dirty, SingleRules, After, Recent, Engine, PunctuationExpands, SpaceAfterPunctuation, Pending, Braille, LastBraille, BrailleRules, BrailleDone
     Critical
     if !Tracking() || ShortcutHeld()
         return
     Loop Parse char {
+        if IsBrailleCell(A_LoopField) {
+            ; Space on the display types the blank cell: Unicode braille
+            ; input is still on.
+            if Ord(A_LoopField) = 0x2800 && Braille.Cells != "" {
+                FinishBraille(" ")
+                continue
+            }
+            ; Space pressed straight after a replacement, before JAWS has
+            ; turned Unicode braille input off, is meant as a space.
+            if Ord(A_LoopField) = 0x2800 && A_TickCount - BrailleDone < 1500 {
+                BrailleDone := 0
+                Replace(1, " ", false, true)
+                continue
+            }
+            ; Cells are not a word PhraseKey can follow.
+            After.Clear()
+            Pending := {Abbreviation: "", Typed: ""}
+            Word := ""
+            Dirty := true
+            Recent := ""
+            if Ord(A_LoopField) != 0x2800 {
+                Braille.Add(A_LoopField, A_TickCount)
+                ; Replace the cells as soon as they match. If they may be the
+                ; start of a longer entry, wait for Space, Enter or a pause.
+                dots := CellsDots(Braille.Cells)
+                if BrailleRules.Has(dots) {
+                    if LongerBrailleEntry(BrailleRules, dots)
+                        SetTimer BrailleSettled, -BrailleRun.SettleMs
+                    else
+                        FinishBraille("")
+                }
+            }
+            continue
+        }
+        ; Any other character means Unicode braille input is off, and the
+        ; cells stay as typed. JAWS is then translating contracted braille,
+        ; erasing and retyping words itself, and an edit of PhraseKey's
+        ; would land among its own and scramble the text.
+        if Braille.Cells != "" {
+            LastBraille := "Last braille cells: dots " CellsDots(Braille.Cells) ".`nNot replaced: they were followed by the character "
+                . A_LoopField ", typed with Unicode braille input off. Press Space or Enter while Unicode braille input is still on."
+            Braille.Clear()
+        }
         After.Add(A_LoopField)
         Recent := SubStr(Recent A_LoopField, -40)
         if Pending.Abbreviation != ""
@@ -715,6 +807,56 @@ CharTyped(hook, char) {
             Recent := ""
         }
     }
+}
+; Expands the braille cells just typed, with JAWS's Unicode braille input
+; still on. ending is "" when they matched as typed; otherwise Space or
+; Enter on the display ended them, and has already reached the window: a
+; space is replaced by the entry's own, and a new line is kept after the
+; replacement.
+FinishBraille(ending) {
+    global Braille, BrailleRules, BrailleAutoOff, LastBraille, BrailleDone
+    typed := Braille.Take()
+    BrailleDone := 0
+    LastBraille := "Last braille cells: dots " typed.Dots
+        . (ending = "" ? ", replaced as soon as they matched.`n" : ", followed by " (ending = "`n" ? "Enter" : "Space") ".`n")
+    if PasswordField() {
+        LastBraille .= "Not replaced: the cursor is in a password field."
+        return
+    }
+    found := BrailleRules.Has(typed.Dots)
+    if ending != ""
+        LastBraille .= found ? "They were replaced." : "Not replaced: no braille entry has these dots."
+    erase := typed.Count + (ending = "" ? 0 : 1)
+    if !found
+        ; A long low buzz, unlike the short tone for Unicode input off.
+        SetTimer () => SoundBeep(250, 180), -1
+    else if ending = "`n"
+        Replace(erase, BrailleRules[typed.Dots] "`n", false, true)
+    else
+        ; Space only says the cells are finished: the entry decides whether a
+        ; space follows, so a prefix such as multi can still run on.
+        Replace(erase, BrailleRules[typed.Dots], WantsSpace("braille:" typed.Dots))
+    if found && ending != "`n"
+        BrailleDone := A_TickCount
+    if BrailleAutoOff
+        SetTimer UnicodeBrailleOff, found ? -1 : -250
+}
+; No cell has followed cells that match an entry and could have gone on to
+; a longer one, so they are that entry. The toggle types nothing, so they
+; are still the last thing typed.
+BrailleSettled() {
+    global Braille, BrailleRules
+    Critical
+    if !Tracking() || Braille.Cells = "" || !BrailleRules.Has(CellsDots(Braille.Cells))
+        return
+    if A_TickCount - Braille.Last < BrailleRun.SettleMs - 50
+        return
+    FinishBraille("")
+}
+; A short low tone says PhraseKey has turned Unicode braille input off.
+UnicodeBrailleOff() {
+    if TurnOffUnicodeBraille()
+        SoundBeep 600, 50
 }
 ; The longest abbreviation that ends what was typed since the last space.
 ; Input is case-insensitive. One that starts with a letter or digit must be
@@ -759,7 +901,7 @@ TogglePause(*) {
         A_TrayMenu.Uncheck("Pause expansion")
 }
 RefreshList(select := "") {
-    global ChordList, SearchEdit, RuleKeys, Rules, SingleRules, SuffixEntries, SuffixKey, NoSpace
+    global ChordList, SearchEdit, RuleKeys, Rules, SingleRules, SuffixEntries, SuffixKey, NoSpace, BrailleRules
     if select = "" && ChordList.Value && ChordList.Value <= RuleKeys.Length
         select := RuleKeys[ChordList.Value]
     ChordList.Delete()
@@ -770,6 +912,8 @@ RefreshList(select := "") {
         entries.Push(["chord:" chord, OneLine(value) " = " DisplayChord(chord) " (chord)"])
     for keys, ending in SuffixEntries
         entries.Push(["suffix:" keys, ending " = " DisplayChord(keys) " " ShortKeyName(SuffixKey) " (suffix chord)"])
+    for dots, value in BrailleRules
+        entries.Push(["braille:" dots, OneLine(value) " = " dots " (braille dots)"])
     RuleKeys := []
     labels := []
     for entry in entries {
@@ -798,8 +942,10 @@ OpenEditor(id := "") {
     EditorGui.AddText("w580", "Entry type:")
     SingleRadio := EditorGui.AddRadio("xm Group Checked", "A&bbreviation")
     ChordRadio := EditorGui.AddRadio("x+20", "C&hord (press together)")
+    BrailleRadio := EditorGui.AddRadio("x+20", "Braille &dots")
     SingleRadio.OnEvent("Click", ModeChanged)
     ChordRadio.OnEvent("Click", ModeChanged)
+    BrailleRadio.OnEvent("Click", ModeChanged)
     SuffixBox := EditorGui.AddCheckbox("xm", "&Treat as suffix: adds an ending, such as ing, to the word just before it")
     SuffixBox.OnEvent("Click", ModeChanged)
     TriggerLabel := EditorGui.AddText("xm w580")
@@ -808,6 +954,10 @@ OpenEditor(id := "") {
     ReplacementEdit := EditorGui.AddEdit("xm w580 r5 WantReturn")
     ReplacementEdit.OnEvent("Change", (*) => ShowForms())
     SpaceBox := EditorGui.AddCheckbox("xm Checked", "Add a s&pace after the replacement")
+    ; A new braille entry starts without one: it is replaced as soon as it
+    ; is typed, often straight before punctuation. Once set, it stays set.
+    SpaceChosen := id != ""
+    SpaceBox.OnEvent("Click", SpaceBoxClicked)
     FormsLabel := EditorGui.AddText("xm w580", "Word f&orms: what your suffix chords make of this word, one per line, such as ing: running. Only real English words are listed. Correct any that are wrong, or add a missing one:")
     FormsEdit := EditorGui.AddEdit("xm w580 r5 WantReturn")
     FormsShown := ""
@@ -819,13 +969,17 @@ OpenEditor(id := "") {
         parts := StrSplit(id, ":",, 2)
         kind := parts[1]
         SingleRadio.Value := kind = "single"
-        ChordRadio.Value := kind != "single"
+        ChordRadio.Value := kind = "chord" || kind = "suffix"
+        BrailleRadio.Value := kind = "braille"
         SuffixBox.Value := kind = "suffix"
-        ChordEdit.Value := kind = "single" ? parts[2] : kind = "suffix" ? DisplayChord(parts[2]) " " ShortKeyName(SuffixKey) : DisplayChord(parts[2])
-        ReplacementEdit.Value := kind = "single" ? SingleRules[parts[2]] : kind = "suffix" ? SuffixEntries[parts[2]] : Rules[parts[2]]
+        ChordEdit.Value := kind = "single" || kind = "braille" ? parts[2] : kind = "suffix" ? DisplayChord(parts[2]) " " ShortKeyName(SuffixKey) : DisplayChord(parts[2])
+        ReplacementEdit.Value := EntryMap(kind)[parts[2]]
         SpaceBox.Value := !NoSpace.Has(id)
     }
     ModeChanged()
+    EditorCells := false
+    ChordEdit.OnEvent("Change", EditorKeysChanged)
+    ChordEdit.OnEvent("LoseFocus", (*) => EditorCellsDone())
     Main.Opt("+Disabled")
     EditorGui.Show()
     ; A new entry starts with its type; editing goes straight to the keys.
@@ -834,8 +988,26 @@ OpenEditor(id := "") {
     else
         ChordEdit.Focus()
 }
+; PhraseKey does not follow typing in its own windows, so cells typed into
+; the Keys box are noticed here. Typing them there means Unicode braille
+; input is on; leaving the box turns it off.
+SpaceBoxClicked(*) {
+    global SpaceChosen
+    SpaceChosen := true
+}
+EditorKeysChanged(*) {
+    global EditorCells, ChordEdit
+    EditorCells := IsBrailleCell(SubStr(ChordEdit.Value, -1))
+}
+EditorCellsDone() {
+    global EditorCells, BrailleAutoOff
+    if EditorCells && BrailleAutoOff
+        UnicodeBrailleOff()
+    EditorCells := false
+}
 CloseEditor(*) {
     global Main, EditorGui, ChordList
+    EditorCellsDone()
     Main.Opt("-Disabled")
     if IsObject(EditorGui)
         EditorGui.Destroy()
@@ -844,10 +1016,13 @@ CloseEditor(*) {
     ChordList.Focus()
 }
 ModeChanged(*) {
-    global SingleRadio, ChordRadio, SuffixBox, TriggerLabel, ReplacementLabel, SpaceBox, SuffixKey
+    global SingleRadio, ChordRadio, BrailleRadio, SuffixBox, TriggerLabel, ReplacementLabel, SpaceBox, SuffixKey, SpaceChosen
     suffix := ChordRadio.Value && SuffixBox.Value
+    if !SpaceChosen
+        SpaceBox.Value := !BrailleRadio.Value
     SuffixBox.Visible := ChordRadio.Value
     TriggerLabel.Text := SingleRadio.Value ? "&Keys (abbreviation, such as addr or $sig):"
+        : BrailleRadio.Value ? "&Keys (turn on Unicode with Backspace+Space+U, then type cells):"
         : suffix ? "&Keys (1 to 7 keys, such as i for ing; the suffix key, " KeyName(SuffixKey) ", is added for you):"
         : "&Keys (2 to 8 different keys, such as t h e or a s `;):"
     ReplacementLabel.Text := suffix ? "&Replacement: the ending to add, such as ing or ness:" : "&Replacement text:"
@@ -886,8 +1061,16 @@ FormsUnchanged() {
 SaveEntry(*) {
     global
     singleMode := SingleRadio.Value = 1
-    suffixMode := !singleMode && SuffixBox.Value = 1
-    if singleMode
+    brailleMode := BrailleRadio.Value = 1
+    suffixMode := ChordRadio.Value = 1 && SuffixBox.Value = 1
+    if brailleMode {
+        key := NormaliseDots(ChordEdit.Value)
+        if key = "" {
+            MsgBox "Enter the dots of each cell, cells separated by spaces, such as 45 134 for dots 4 5 then dots 1 3 4. Up to 20 cells.", "Check dots"
+            ChordEdit.Focus()
+            return
+        }
+    } else if singleMode
         key := StrLower(Trim(ChordEdit.Value))
     else if suffixMode
         key := Normalise(StrReplace(RegExReplace(ChordEdit.Value, "i)\bspace\b"), SuffixKey), 1, 7)
@@ -913,15 +1096,16 @@ SaveEntry(*) {
         ReplacementEdit.Focus()
         return
     }
-    id := (singleMode ? "single:" : suffixMode ? "suffix:" : "chord:") key
-    if singleMode ? SingleRules.Has(key) && id != EditingId : ChordInUse(suffixMode ? SuffixChord(key) : key, EditingId) {
-        MsgBox singleMode ? "That entry already exists. Select it in the list and choose Edit."
+    kind := brailleMode ? "braille" : singleMode ? "single" : suffixMode ? "suffix" : "chord"
+    id := kind ":" key
+    if singleMode || brailleMode ? EntryMap(kind).Has(key) && id != EditingId : ChordInUse(suffixMode ? SuffixChord(key) : key, EditingId) {
+        MsgBox singleMode || brailleMode ? "That entry already exists. Select it in the list and choose Edit."
             : "Another chord or suffix chord already uses exactly these keys. Select it in the list and choose Edit.", "Duplicate entry"
         return
     }
     if EditingId != "" && EditingId != id
         DeleteEntry(EditingId)
-    (singleMode ? SingleRules : suffixMode ? SuffixEntries : Rules)[key] := replacement
+    EntryMap(kind)[key] := replacement
     if suffixMode || SpaceBox.Value {
         if NoSpace.Has(id)
             NoSpace.Delete(id)
@@ -948,10 +1132,15 @@ ChordInUse(chord, editing) {
             return true
     return false
 }
+; The entries of one kind, named as at the start of an entry's id.
+EntryMap(kind) {
+    global SingleRules, Rules, SuffixEntries, BrailleRules
+    return kind = "single" ? SingleRules : kind = "suffix" ? SuffixEntries : kind = "braille" ? BrailleRules : Rules
+}
 DeleteEntry(id) {
-    global SingleRules, Rules, SuffixEntries, NoSpace
+    global NoSpace
     parts := StrSplit(id, ":",, 2)
-    (parts[1] = "single" ? SingleRules : parts[1] = "suffix" ? SuffixEntries : Rules).Delete(parts[2])
+    EntryMap(parts[1]).Delete(parts[2])
     if NoSpace.Has(id)
         NoSpace.Delete(id)
 }
@@ -1076,6 +1265,9 @@ OpenOptions(*) {
     OptSpace := OptionsGui.AddCheckbox("xm y+8 w860" (SpaceAfterPunctuation ? " Checked" : ""),
         "Add a &space after punctuation that follows a replacement. PhraseKey always removes the space it added when you type punctuation straight after, so like followed by a full stop gives like with the full stop. "
         . "Checked: PhraseKey also adds a space after the punctuation, ready for the next word. Unchecked: you type that space yourself, as usual.")
+    OptBraille := OptionsGui.AddCheckbox("xm y+8 w860" (BrailleAutoOff ? " Checked" : ""),
+        "Turn JAWS &Unicode braille input off after a braille entry. To type a braille entry, turn Unicode braille input on with Backspace+Space+U (dots 1 3 6 7 with Space), then type the cells: they are replaced as soon as they match. "
+        . "Checked: PhraseKey then asks JAWS to turn Unicode braille input off, ready for ordinary braille. Unchecked: it stays on until you turn it off.")
     OptionsGui.AddText("xm y+8 w860", "&Chord timing, in milliseconds, from 5 to 500. Normally 30. The keys of a chord of two or three keys must all go down within this time, which is how PhraseKey tells a chord from fast typing. "
         . "Lower it if chords go off while you are typing normally. Raise it if your chords often fail. "
         . "Chords of four or more keys have no time limit.")
@@ -1129,6 +1321,7 @@ SaveOptions(*) {
     SuffixKey := key
     SuffixOnTyped := OptTyped.Value
     PunctuationExpands := OptExpand.Value
+    BrailleAutoOff := OptBraille.Value
     SpaceAfterPunctuation := OptSpace.Value
     WindowMs := window
     SpaceWindowMs := spaceWindow
@@ -1233,6 +1426,7 @@ Persist() {
         IniWrite SpaceAfterPunctuation ? 1 : 0, temp, "Options", "SpaceAfterPunctuation"
         IniWrite SuffixOnTyped ? 1 : 0, temp, "Options", "SuffixOnTypedWords"
         IniWrite PunctuationExpands ? 1 : 0, temp, "Options", "PunctuationExpands"
+        IniWrite BrailleAutoOff ? 1 : 0, temp, "Options", "BrailleAutoOff"
         IniWrite EncodeKey(SuffixKey), temp, "Options", "SuffixKey"
         ; Sentinel distinguishes an intentionally empty collection.
         IniWrite "1", temp, "Chords", "_saved"
@@ -1244,6 +1438,8 @@ Persist() {
         IniWrite "1", temp, "Suffixes", "_saved"
         for keys, ending in SuffixEntries
             IniWrite Encode(ending), temp, "Suffixes", EncodeKey(keys)
+        for dots, value in BrailleRules
+            IniWrite Encode(value), temp, "Braille", EncodeKey(dots)
         for id in NoSpace
             IniWrite "1", temp, "NoSpace", EncodeKey(id)
         for word, forms in SavedForms

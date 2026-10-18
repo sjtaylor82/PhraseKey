@@ -2,10 +2,11 @@
 
 PhraseKey is a small Windows program that types text for you. You set up a short trigger, and PhraseKey replaces it with whatever you want, for example, a phrase, your address, or an email signature.
 
-There are two kinds of triggers:
+There are three kinds of triggers:
 
 - **Abbreviations.** Type a short code and press Space. For example, type `brb` then Space and get "be right back".
 - **Chords.** Press several keys at the same time like on a braille display or piano, then let go. For example, press T, H and E together and get the word "the".
+- **Braille entries.** On a braille display with JAWS, type a sequence of braille cells, such as dots 4 5 then dots 2 3 4, and get your text. See **Braille entries**.
 
 Straight after a word, whether you typed it or PhraseKey did, a **suffix chord** can add an ending: "walk" becomes "walking", "happy" becomes "happiness", "run" becomes "ran".
 
@@ -178,6 +179,48 @@ If you only want suffix chords to work after chords and abbreviations, uncheck *
 
 You might want this if a program changes what you type behind PhraseKey's back. See **Autocorrect** under **Troubleshooting**.
 
+## Braille entries
+
+If you type on a braille display with JAWS, you can make a **braille entry**: a sequence of braille cells, identified by their exact dots, that PhraseKey replaces with your text. Because PhraseKey sees the dots rather than translated letters, a braille entry never clashes with ordinary contracted braille, and works whichever braille table you use.
+
+### Typing a braille entry
+
+1. Press **Backspace+Space+U** (dots 1 3 6 7 with Space). This is JAWS's own command to turn on Unicode braille input.
+2. Type the cells, for example dots 4 5 then dots 2 3 4.
+
+That's all. As soon as the cells match one of your entries, PhraseKey replaces them with your text and turns Unicode braille input off for you. You hear a short low tone, and you are back in ordinary braille.
+
+### In short
+
+- **You turn Unicode braille input on. PhraseKey turns it off.** Don't press Backspace+Space+U again afterwards: that would turn it back on, and JAWS would say so.
+- **After a replacement, Space types a space as usual.** You are back in ordinary braille.
+- **Enter gives a new line,** as usual.
+- **A new braille entry adds no space after its text.** That way you can go straight on with punctuation, or with the rest of a word. If you want PhraseKey to add the space for you, check **Add a space after the replacement** when you set the entry up.
+
+### Entries that start the same way
+
+You can have one entry whose cells are the start of another's, for example 45p (dots 4 5, then 1 2 3 4) and 45pe (dots 4 5, then 1 2 3 4, then 1 5). PhraseKey can't tell which you mean until you go on:
+
+- The longer one, 45pe, is replaced as soon as you type its last cell.
+- The shorter one, 45p, is replaced when no further cell comes for 1 second. Just stop and wait for the tone.
+- Or press **Space** to replace the shorter one straight away. Here Space only means "finished": it is used up, and the entry decides whether a space follows. With 45m set up as multi, with no space, 45m then Space gives multi, ready for the rest of the word. Press Space again if you do want a space.
+- **Enter** also replaces the shorter one straight away, and gives a new line.
+
+### Things to know
+
+- PhraseKey changes nothing in JAWS. It uses JAWS's built-in Unicode braille command, and turns it off through the interface JAWS provides for other programs.
+- If cells don't match any entry, they stay as typed. Press Space to finish with them: you hear a longer, lower buzz, and Unicode braille input is turned off.
+- A pause of more than 3 seconds between cells starts afresh: the cells before the pause stay as typed.
+- Tab, Escape or an arrow key straight after cells leaves them as typed, and turns Unicode braille input off.
+- Enter only ends cells within 2 seconds of the last one. In programs that act on Enter at once, such as a chat program that sends the message, use Space instead.
+- If you turn Unicode braille input off yourself before the cells are replaced, PhraseKey can't tell, and there is no tone. Cells that match a shorter entry are still replaced after the 1-second pause, and Unicode braille input then comes back on, which JAWS announces. Any other cells stay as typed: JAWS is then translating your braille, and PhraseKey stays out of its way so your text is not scrambled.
+- For an entry that adds a space, punctuation straight after it replaces that space, as for any other replacement.
+- To set up an entry, choose **Braille dots** in the Add window. In **Keys**, turn on Unicode braille input and type the cells; it is turned off when you leave the box. You can also type the dot numbers instead, with a space between cells, for example `45 234`.
+- Switching to another program turns Unicode braille input off. That is JAWS's behaviour, not PhraseKey's.
+- To keep Unicode braille input on after each entry, uncheck **Turn JAWS Unicode braille input off after a braille entry** in **Options**.
+- If something doesn't work as expected, press **Ctrl+Alt+F10** straight away. It tells you which dots PhraseKey received and why they were or weren't replaced.
+- NVDA has no command to turn Unicode braille input on and off, so braille entries are for JAWS for now.
+
 ## Word forms
 
 When you add or edit a chord or abbreviation whose replacement is a single word, the window shows **Word forms** (Alt+O). It lists what each of your suffix chords will make of that word, one per line, for example:
@@ -288,6 +331,7 @@ Choose **Options** in the main window (Alt+O). Changes take effect when you choo
 - **Suffix chords also work on words I type** (Alt+W): on to begin with. When off, suffix chords only work after a chord or abbreviation.
 - **Abbreviations also expand when followed by punctuation** (Alt+B): on to begin with. When off, only Space expands an abbreviation.
 - **Add a space after punctuation that follows a replacement** (Alt+S): off to begin with.
+- **Turn JAWS Unicode braille input off after a braille entry** (Alt+U): on to begin with. See **Braille entries**.
 - **Chord timing** (Alt+C): how close together, in milliseconds, the keys of a two- or three-key chord must go down. 5 to 500, 30 to begin with. Chords of four or more keys have no limit, because typing never holds that many keys at once.
 - **Space chord timing** (Alt+T): the same, for chords that include Space. 5 to 500, 20 to begin with.
 - **Open the folder where your entries are saved** (Alt+F): opens the folder holding `settings.ini`. See **Where your entries are saved**.
@@ -326,14 +370,15 @@ Most people find a good setting within a few tries. A suffix key of `;`, `/` or 
 
 ## Adding, changing and removing entries
 
-The saved-entry list starts each row with its replacement text, followed by its trigger and whether it is a chord or abbreviation. With the list focused, type the first letter of a replacement to move to it. Use **Search saved entries** to filter the list by replacement, trigger or type.
+The saved-entry list starts each row with its replacement text, followed by its trigger and whether it is an abbreviation, chord, suffix chord or braille entry. With the list focused, type the first letter of a replacement to move to it. Use **Search saved entries** to filter the list by replacement, trigger or type.
 
 1. In the PhraseKey window, choose **Add**. To change an entry, select it in the list and choose **Edit**.
-2. Choose **Abbreviation** or **Chord**. For a suffix chord, choose **Chord** and check **Treat as suffix**.
+2. Choose **Abbreviation**, **Chord** or **Braille dots**. For a suffix chord, choose **Chord** and check **Treat as suffix**.
 3. In **Keys**, type the trigger.
    - For an abbreviation, type it as you would use it, for example `brb`.
    - For a chord, type the keys with spaces between them, for example `t h e` or `a s ;`. Type punctuation and number keys without Shift: `4`, not `$`.
    - For a suffix chord, type its keys without the suffix key, for example `i`. PhraseKey adds the suffix key for you.
+   - For a braille entry, type the dots of each cell with spaces between cells, for example `45 134` for dots 4 5 then dots 1 3 4. Or turn on Unicode braille input with Backspace+Space+U and type the cells themselves; it is turned off when you leave the box.
 4. In **Replacement text**, type what you want it to become. It can be more than one line. For a suffix chord, type the ending instead, such as `ing` or `ness`.
 5. Uncheck **Add a space after the replacement** if it should run straight into what comes next.
 6. Choose **Save**. The entry works straight away.
@@ -375,7 +420,7 @@ Unchecking that box means NVDA no longer responds to keys typed by other program
 
 ### JAWS
 
-No settings need changing.
+No settings need changing. For typing braille entries on a braille display, see **Braille entries**.
 
 ## Keyboard shortcuts
 
@@ -385,7 +430,7 @@ From anywhere:
 
 - Ctrl+Alt+F11: bring the PhraseKey window back
 - Ctrl+Alt+F12: close PhraseKey
-- Ctrl+Alt+F10: explain the last chord attempt. If a chord doesn't work, press this straight away to hear which keys PhraseKey saw, how far apart they went down, and why it didn't replace them.
+- Ctrl+Alt+F10: explain the last chord attempt. If a chord doesn't work, press this straight away to hear which keys PhraseKey saw, how far apart they went down, and why it didn't replace them. It also explains the last braille cells: which dots PhraseKey received, and why they were or weren't replaced.
 
 In the PhraseKey window:
 
@@ -408,6 +453,7 @@ In the Options window:
 - Alt+W: suffix chords also work on words I type
 - Alt+B: abbreviations also expand when followed by punctuation
 - Alt+S: add a space after punctuation that follows a replacement
+- Alt+U: turn JAWS Unicode braille input off after a braille entry
 - Alt+C: chord timing
 - Alt+T: Space chord timing
 - Alt+F: open the folder where your entries are saved
@@ -416,6 +462,7 @@ In the Add or Edit window:
 
 - Alt+B: abbreviation
 - Alt+H: chord
+- Alt+D: braille dots
 - Alt+T: treat as suffix
 - Alt+K: keys
 - Alt+R: replacement text

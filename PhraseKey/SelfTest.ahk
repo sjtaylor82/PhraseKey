@@ -4,6 +4,7 @@
 #Include WordForms.ahk
 #Include Bundled.ahk
 #Include Updater.ahk
+#Include BrailleInput.ahk
 
 ; Tests use the ACTUAL recogniser, with deterministic event times.
 ; No keyboard hooks, GUI input, settings changes or text injection.
@@ -252,6 +253,31 @@ try {
     FileAppend "abc", sample, "UTF-8-RAW"
     Check(FileSha256(sample), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "SHA-256")
     FileDelete sample
+
+    Check(CellDots(Chr(0x2818)), "45", "Cell dots 45")
+    Check(CellDots(Chr(0x28FF)), "12345678", "Cell with all eight dots")
+    Check(CellsDots(Chr(0x2818) Chr(0x280D)), "45 134", "Cells into dots")
+    Check(IsBrailleCell(Chr(0x2800)), true, "Blank cell is a cell")
+    Check(IsBrailleCell("m"), false, "A letter is not a cell")
+    for pair in [["45 134", "45 134"], [" 45-134 ", "45 134"], ["45/134", "45 134"], ["54 431", "45 134"],
+            [Chr(0x2818) Chr(0x280D), "45 134"], [Chr(0x2818) Chr(0x280D) Chr(0x2800), "45 134"],
+            ["78", "78"], ["", ""], ["9", ""], ["0", ""], ["445", ""], ["45 x", ""], [Chr(0x2800), ""]]
+        Check(NormaliseDots(pair[1]), pair[2], "Normalise dots [" pair[1] "]")
+    cells := BrailleRun()
+    cells.Add(Chr(0x2818), 1000), cells.Add(Chr(0x280D), 1500)
+    taken := cells.Take()
+    Check(taken.Dots " " taken.Count, "45 134 2", "Run of two cells")
+    Check(cells.Cells, "", "Taking a run clears it")
+    cells.Add(Chr(0x2818), 1000), cells.Add(Chr(0x280D), 1000 + BrailleRun.PauseMs + 1)
+    Check(cells.Take().Dots, "134", "A pause drops the cells before it")
+    cells.Add(Chr(0x2818), 0), cells.Add(Chr(0x2801), 10), cells.Erase(), cells.Add(Chr(0x280D), 20)
+    Check(cells.Take().Dots, "45 134", "Backspace erases the last cell")
+
+    rules := Map("45", "a", "45 234", "b", "1 12", "c")
+    Check(LongerBrailleEntry(rules, "45"), true, "45 may become 45 234")
+    Check(LongerBrailleEntry(rules, "45 234"), false, "Nothing longer than 45 234")
+    Check(LongerBrailleEntry(rules, "4"), false, "4 is not the start of 45's first cell")
+    Check(LongerBrailleEntry(rules, "1"), true, "1 may become 1 12")
 
     if A_Args.Length && A_Args[1] = "--quiet"
         FileAppend Count " checks passed.`n", "*"
