@@ -41,6 +41,7 @@ Things to know:
 - An abbreviation that starts with a letter or number must be a word on its own. `addr` will not fire at the end of "xaddr".
 - An abbreviation that starts with punctuation, such as `$sig` or `#sig`, fires wherever you type it.
 - If you make a typo, use Backspace to fix it before pressing Space.
+- **To undo an expansion,** press Backspace straight after it. `brb` Space gives "be right back "; Backspace then puts back `brb` and your Space, as you typed them. This works for abbreviations typed on the keyboard or a braille display. Only the Backspace straight after counts: once you type anything else, Backspace deletes as usual.
 - To end a sentence with an abbreviation, type the abbreviation then the full stop: `brb.` gives "be right back.". Typing Space first works too: `brb` Space `.` also gives "be right back.", because PhraseKey removes its own space before punctuation.
 
 ### Ending an abbreviation with punctuation
@@ -389,6 +390,7 @@ The saved-entry list starts each row with its replacement text, followed by its 
 - Press **Ctrl+Alt+F11** from anywhere to bring the window back.
 - Press **Ctrl+Alt+F12** from anywhere to close PhraseKey.
 - Closing the main window, or choosing **Exit**, closes PhraseKey completely.
+- Only one copy of PhraseKey runs at a time. Starting it again, even from another folder, closes the copy already running, so two can never both replace the same text.
 - To pause without closing, use the PhraseKey icon in the notification area and choose **Pause expansion**. Choose it again to resume.
 
 ## Sound
@@ -421,6 +423,8 @@ Unchecking that box means NVDA no longer responds to keys typed by other program
 ### JAWS
 
 No settings need changing. For typing braille entries on a braille display, see **Braille entries**.
+
+When you type on a braille display, JAWS puts your words straight into the document instead of typing them as keys, so PhraseKey only sees the Space. To expand an abbreviation typed this way, PhraseKey then reads the word before the cursor from the document itself. This works in most programs, including Notepad, Word and web pages. Because PhraseKey reads whatever word is there, moving the cursor to the end of an abbreviation already in the text and pressing Space also expands it. This doesn't work in boxes that fill in suggestions as you type, such as the Run box or the file name box in Open and Save windows: there JAWS's braille typing and the suggestions get out of step with any change PhraseKey makes, so PhraseKey leaves words typed on the display alone. Abbreviations typed on the keyboard still work there.
 
 ## Keyboard shortcuts
 

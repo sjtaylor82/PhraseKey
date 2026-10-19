@@ -6,13 +6,19 @@
 #Include Bundled.ahk
 #Include Updater.ahk
 #Include BrailleInput.ahk
+#Include CaretText.ahk
 
 ; Chords use letter, digit and punctuation keys; abbreviations any characters.
 ; Settings only are persisted. Typed text is never logged or saved.
 SendMode "Event"
 SetKeyDelay -1, -1
 SetWorkingDir A_ScriptDir
-AppVersion := "0.9.4"
+; Only one copy may run, wherever each was started from: two would both
+; replace the same text. #SingleInstance only covers the same file. A copy
+; started by the automated tests, with its own settings, leaves others be.
+if !(A_Args.Length && A_Args[1] = "--settings")
+    CloseOtherCopies()
+AppVersion := "0.9.5"
 Rules := Map("eht", "the")
 SingleRules := Map()
 ; Suffix chords are saved without the suffix key, as "i" => "ing";
@@ -137,6 +143,16 @@ After := AfterExpansion()
 Braille := BrailleRun()
 ; What happened to the last braille cells, for Ctrl+Alt+F10.
 LastBraille := ""
+; Counts keys and characters, so a later look at the document can tell if
+; anything was typed meanwhile. JawsCheck is the count when one was asked
+; for; LastJaws says what the last look found, for Ctrl+Alt+F10.
+InputSeen := 0
+; The last abbreviation replaced, so a Backspace straight after can undo it:
+; {Typed, Inserted, Jaws}, or "" once anything else is typed.
+Undo := ""
+JawsCheck := -1
+JawsBefore := ""
+LastJaws := ""
 ; When braille cells were last replaced, as A_TickCount, unless by Enter.
 BrailleDone := 0
 Paused := false
@@ -219,6 +235,19 @@ if A_IsCompiled {
 if CheckUpdates
     SetTimer () => CheckForUpdate(false), -5000
 
+; Asks any other running PhraseKey, script or program, to exit, as its own
+; File > Exit would. Each has a hidden main window titled with its path.
+CloseOtherCopies() {
+    own := DllCall("GetCurrentProcessId", "UInt")
+    DetectHiddenWindows true
+    for hwnd in WinGetList("ahk_class AutoHotkey") {
+        try {
+            if WinGetPID(hwnd) != own && RegExMatch(WinGetTitle(hwnd), "i)\\PhraseKey\.(ahk|exe)\b")
+                PostMessage 0x111, 65405,,, hwnd    ; WM_COMMAND, ID_FILE_EXIT
+        }
+    }
+    DetectHiddenWindows false
+}
 ; False while paused or while one of this program's own windows is active.
 Tracking() {
     global Paused, OwnPid, Target
@@ -236,10 +265,11 @@ Tracking() {
     return false
 }
 ClearTyping() {
-    global Engine, Word, Dirty, After, Recent, Pending, Braille
+    global Engine, Word, Dirty, After, Recent, Pending, Braille, Undo
     Engine.Break()
     After.Clear()
     Braille.Clear()
+    Undo := ""
     Pending := {Abbreviation: "", Typed: ""}
     Word := ""
     Dirty := false
@@ -406,7 +436,7 @@ SoundToggled(*) {
 ; Says why the most recent set of keys did or did not make a chord. Typing
 ; anything else first replaces it, so press this straight after the attempt.
 ExplainLastChord(*) {
-    global Engine, LastBraille
+    global Engine, LastBraille, LastJaws
     last := Engine.Last
     if last.Keys = "" {
         message := "No chord has been attempted since PhraseKey started."
@@ -419,6 +449,8 @@ ExplainLastChord(*) {
     }
     if LastBraille != ""
         message .= "`n`n" LastBraille
+    if LastJaws != ""
+        message .= "`n`n" LastJaws
     report := Gui(, "PhraseKey: last chord")
     report.SetFont("s11", "Segoe UI")
     ; A read-only edit takes the focus, so a screen reader reads the message.
@@ -573,12 +605,15 @@ RelayedErase() {
     return true
 }
 KeyDown(hook, vk, sc) {
-    global Engine, Word, Dirty, After, Recent, Pending, Braille, BrailleAutoOff, LastBraille
+    global Engine, Word, Dirty, After, Recent, Pending, Braille, BrailleAutoOff, LastBraille, InputSeen, Undo
     Critical
+    InputSeen += 1
     if vk = 0x10 || vk = 0xA0 || vk = 0xA1    ; Shift
         return
     if !Tracking()
         return
+    if vk != 0x08
+        Undo := ""
     ; Ctrl, Alt, Win, Caps Lock
     if vk = 0x11 || vk = 0x12 || vk = 0x14 || vk = 0x5B || vk = 0x5C || (vk >= 0xA2 && vk <= 0xA5) {
         Engine.Break()
@@ -606,6 +641,15 @@ KeyDown(hook, vk, sc) {
         lastErase := A_TickCount
         if duplicate
             return
+        if IsObject(Undo) && !PasswordField() {
+            ; JAWS passes a Backspace on to the program a moment later, so
+            ; wait for it to land before undoing.
+            last := Undo
+            Undo := ""
+            seen := InputSeen
+            SetTimer () => UndoExpansion(last, seen), -120
+            return
+        }
         After.Clear()
         Pending := {Abbreviation: "", Typed: ""}
         Braille.Erase()
@@ -712,6 +756,8 @@ ExpandPending(ending) {
     ; Typing: expand as the Space would have, keeping what came after it.
     Replace(StrLen(abbreviation) + 1 + StrLen(typed), replacement (space ? " " : "") typed, false, true)
     After.Clear()
+    if typed = ""
+        Expanded(abbreviation " ", replacement (space ? " " : ""))
     if !InStr(typed, " ") {
         Word := typed
         Dirty := !space
@@ -724,11 +770,13 @@ FixPunctuation() {
         Replace(edit.Erase, edit.Text, false, true)
 }
 CharTyped(hook, char) {
-    global Word, Dirty, SingleRules, After, Recent, Engine, PunctuationExpands, SpaceAfterPunctuation, Pending, Braille, LastBraille, BrailleRules, BrailleDone
+    global Word, Dirty, SingleRules, After, Recent, Engine, PunctuationExpands, SpaceAfterPunctuation, Pending, Braille, LastBraille, BrailleRules, BrailleDone, InputSeen, JawsCheck, JawsBefore, LastJaws, Undo
     Critical
+    InputSeen += 1
     if !Tracking() || ShortcutHeld()
         return
     Loop Parse char {
+        Undo := ""
         if IsBrailleCell(A_LoopField) {
             ; Space on the display types the blank cell: Unicode braille
             ; input is still on.
@@ -778,23 +826,52 @@ CharTyped(hook, char) {
             Pending.Typed .= A_LoopField
         FixPunctuation()
         if A_LoopField = " " {
+            ; JAWS types braille display input straight into the document,
+            ; so only its Space reaches here: read the word from there.
+            fromJaws := Word = "" && !Dirty && SingleRules.Count && ProcessExist("jfw.exe") && !SuggestingBox()
+            ; The text may end with this Space or not yet, depending on the
+            ; program. If it is as it was when last read, spaces aside,
+            ; JAWS's new word has not arrived yet: the word there is older.
+            if fromJaws {
+                text := ReadForJaws(TextBeforeCaret(&how), how, true)
+                if JawsTextNew(text)
+                    Word := SubStr(text, -1) = " " ? WordBeforeSpace(text) : WordAtEnd(text)
+            }
             abbreviation := FindAbbreviation()
+            typed := abbreviation = "" ? "" : SubStr(Word, -StrLen(abbreviation))
             Word := ""
             Dirty := false
+            ; Some programs, Notepad among them, get JAWS's word a moment
+            ; after its Space: look again once both have arrived.
+            if fromJaws && abbreviation = "" {
+                JawsCheck := InputSeen
+                SetTimer JawsWordCheck, -150
+            } else if fromJaws {
+                ; The text changes with the replacement.
+                JawsBefore := ""
+                LastJaws .= " Expanded " abbreviation "."
+            }
             if abbreviation != "" && !PasswordField() {
                 ; With Space as the suffix key, this Space may be the start of
                 ; a suffix chord. Expanding now would delay the chord's other
                 ; keys and spoil its timing, so wait until Space is let go.
-                if Engine.MayComplete()
+                ; A Space from the braille display is never part of a chord.
+                space := WantsSpace("single:" abbreviation)
+                if !fromJaws && Engine.MayComplete()
                     Pending := {Abbreviation: abbreviation, Typed: ""}
                 else
-                    Replace(StrLen(abbreviation) + 1, SingleRules[abbreviation], WantsSpace("single:" abbreviation))
+                    Replace(StrLen(abbreviation) + 1, SingleRules[abbreviation], space)
+                if Pending.Abbreviation = ""
+                    Expanded(typed " ", SingleRules[abbreviation] (space ? " " : ""))
             }
         } else if PunctuationExpands && InStr(".,;:!?)", A_LoopField) && !Engine.MayComplete()
                 && (abbreviation := FindAbbreviation()) != "" && !PasswordField() {
             ; brb. gives "be right back." Not while a chord using this key
             ; may be under way: it would erase what it typed.
-            Replace(StrLen(abbreviation) + 1, SingleRules[abbreviation] A_LoopField (SpaceAfterPunctuation ? " " : ""), false, true)
+            inserted := SingleRules[abbreviation] A_LoopField (SpaceAfterPunctuation ? " " : "")
+            typed := SubStr(Word, -StrLen(abbreviation)) A_LoopField
+            Replace(StrLen(abbreviation) + 1, inserted, false, true)
+            Expanded(typed, inserted)
         } else if RegExMatch(A_LoopField, "^[^\s[:cntrl:]]$") {
             Word .= A_LoopField
             ; Keep only as much as the longest abbreviation could need.
@@ -840,6 +917,81 @@ FinishBraille(ending) {
         BrailleDone := A_TickCount
     if BrailleAutoOff
         SetTimer UnicodeBrailleOff, found ? -1 : -250
+}
+; Notes what was read from the document for Ctrl+Alt+F10, and returns it.
+ReadForJaws(text, how, first := false) {
+    global LastJaws
+    if first
+        LastJaws := "Last word read from the document, for JAWS braille typing."
+    LastJaws .= "`n" (first ? "At the Space: " : "A moment later: ")
+        . (text = "" ? "nothing" : Chr(34) StrReplace(StrReplace(SubStr(text, -20), "`r", " "), "`n", " ") Chr(34)) ", through " how "."
+    return text
+}
+; True if text, read before the cursor, has changed since it was last read,
+; spaces at the end aside: only then can the word there be one JAWS has just
+; typed. Every read is remembered, whatever it finds, so an older word is
+; never taken for a new one.
+JawsTextNew(text) {
+    global JawsBefore
+    changed := text != "" && RTrim(text) !== RTrim(JawsBefore)
+    JawsBefore := text
+    if !changed
+        AddJawsNote(text = "" ? "" : " Unchanged, so not a new word.")
+    return changed
+}
+AddJawsNote(note) {
+    global LastJaws
+    LastJaws .= note
+}
+; The second look at the document for a word JAWS typed: only if nothing
+; has been typed since, and once the program has handled the Space.
+JawsWordCheck() {
+    global InputSeen, JawsCheck, JawsBefore, Word, Dirty, SingleRules, LastJaws
+    Critical
+    if JawsCheck != InputSeen || !Tracking() || PasswordField()
+        return
+    JawsCheck := -1
+    text := ReadForJaws(TextBeforeCaret(&how), how)
+    if !JawsTextNew(text)
+        return
+    if SubStr(text, -1) != " " {
+        LastJaws .= " The Space has not arrived there yet."
+        return
+    }
+    Word := WordBeforeSpace(text)
+    Dirty := false
+    abbreviation := FindAbbreviation()
+    typed := abbreviation = "" ? "" : SubStr(Word, -StrLen(abbreviation))
+    Word := ""
+    LastJaws .= abbreviation = "" ? " No abbreviation." : " Expanded " abbreviation "."
+    if abbreviation = ""
+        return
+    space := WantsSpace("single:" abbreviation)
+    Replace(StrLen(abbreviation) + 1, SingleRules[abbreviation], space)
+    Expanded(typed " ", SingleRules[abbreviation] (space ? " " : ""))
+}
+; Notes an abbreviation just replaced, typed as typed, so a Backspace
+; straight after can put it back. inserted is all PhraseKey typed for it.
+Expanded(typed, inserted) {
+    global Undo
+    Undo := {Typed: typed, Inserted: inserted}
+}
+; Backspace straight after an abbreviation was replaced: put back what was
+; typed, last.Typed. The Backspace has taken the replacement's last
+; character by now. The text before the cursor must show that, if the
+; program can say; if not, nothing but that Backspace, and perhaps JAWS's
+; copy of it, may have been typed since. Otherwise leave the text alone.
+UndoExpansion(last, seen) {
+    global After, InputSeen
+    Critical
+    if !Tracking() || PasswordField()
+        return
+    expected := StrReplace(SubStr(last.Inserted, 1, -1), "`r`n", "`n")
+    text := StrReplace(StrReplace(TextBeforeCaret(&how), "`r`n", "`n"), "`r", "`n")
+    if text != "" ? SubStr(text, -StrLen(expected)) !== expected : InputSeen - seen > 1
+        return
+    Replace(StrLen(last.Inserted) - 1, last.Typed, false, true)
+    After.Clear()
 }
 ; No cell has followed cells that match an entry and could have gone on to
 ; a longer one, so they are that entry. The toggle types nothing, so they

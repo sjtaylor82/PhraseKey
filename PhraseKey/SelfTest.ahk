@@ -5,6 +5,7 @@
 #Include Bundled.ahk
 #Include Updater.ahk
 #Include BrailleInput.ahk
+#Include CaretText.ahk
 
 ; Tests use the ACTUAL recogniser, with deterministic event times.
 ; No keyboard hooks, GUI input, settings changes or text injection.
@@ -272,6 +273,11 @@ try {
     Check(cells.Take().Dots, "134", "A pause drops the cells before it")
     cells.Add(Chr(0x2818), 0), cells.Add(Chr(0x2801), 10), cells.Erase(), cells.Add(Chr(0x280D), 20)
     Check(cells.Take().Dots, "45 134", "Backspace erases the last cell")
+
+    for pair in [["I said dep", "dep"], ["I said dep ", ""], ["(dep", "(dep"], ["line`ndep", "dep"], ["line`r`n", ""], ["", ""]]
+        Check(WordAtEnd(pair[1]), pair[2], "Word at end of [" pair[1] "]")
+    for pair in [["I said dep ", "dep"], ["I said dep", ""], ["(dep ", "(dep"], ["dep  ", ""], ["line`n ", ""], [" ", ""]]
+        Check(WordBeforeSpace(pair[1]), pair[2], "Word before Space in [" pair[1] "]")
 
     rules := Map("45", "a", "45 234", "b", "1 12", "c")
     Check(LongerBrailleEntry(rules, "45"), true, "45 may become 45 234")
